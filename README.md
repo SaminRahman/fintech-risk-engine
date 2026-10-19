@@ -1,0 +1,24 @@
+# FinTech & Risk Operations Engine
+
+A fraud and credit-risk analytics dashboard for device-financing applications, built with Python, DuckDB SQL, and Streamlit.
+
+## Why I built this
+I spent 4 years at Rogers investigating device-financing fraud. This project turns that domain experience into a working analytics tool: it detects risky applications, quantifies fraud rates, and presents the findings in a live dashboard.
+
+## Tech stack
+- Python (pandas, numpy)
+- DuckDB (SQL analytics)
+- Streamlit + Plotly (dashboard)
+
+## Roadmap
+- [ ] Synthetic data generator
+- [ ] SQL fraud analysis (by channel, device, account age)
+- [ ] Rule-based risk scoring
+- [ ] Streamlit dashboard
+- [ ] Deployed live demo
+
+## Status
+In active development (started October 2026).
+
+## Author
+[Your Name], [LinkedIn URL]
