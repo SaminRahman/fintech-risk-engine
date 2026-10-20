@@ -42,7 +42,7 @@ account_age_days = rng.integers(0, 3650, N)
 apps_last_24h = rng.poisson(0.3, N)
 
 # Does the billing address differ from the shipping address? True for ~8% of rows.
-address_mismatch = rng.choice(N) < 0.08
+address_mismatch = rng.random(N) < 0.08
 
 # --- STEP 2: Build the fraud risk for each application ---
 # Start at 1% base risk, then ADD risk for each warning sign.
