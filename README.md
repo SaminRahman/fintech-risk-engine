@@ -10,6 +10,9 @@ I spent 4 years at Rogers investigating device-financing fraud. This project tur
 - DuckDB (SQL analytics)
 - Streamlit + Plotly (dashboard)
 
+## Documentation
+See the full [Project Architecture](docs/architecture.md) for the problem statement, data dictionary, risk rules, results and validation checks.
+
 ## Roadmap
 - [ ] Synthetic data generator
 - [ ] SQL fraud analysis (by channel, device, account age)
