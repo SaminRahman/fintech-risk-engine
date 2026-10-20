@@ -21,4 +21,4 @@ I spent 4 years at Rogers investigating device-financing fraud. This project tur
 In active development (started October 2026).
 
 ## Author
-[Your Name], [LinkedIn URL]
+Samin Yasar Rahman, https://www.linkedin.com/in/saminrahman/
