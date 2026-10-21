@@ -6,3 +6,4 @@ __pycache__/
 data/raw/
 .ipynb_checkpoints/
 data/processed/
+.agents/
