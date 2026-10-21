@@ -8,6 +8,7 @@ from pathlib import Path
 import duckdb
 import plotly.express as px
 import streamlit as st
+import pandas as pd
 
 DATA = "data/processed/scored_applications.csv"
 
@@ -118,3 +119,55 @@ st.plotly_chart(fig)
 # --- SECTION 3: the numbers behind the chart ---
 st.subheader("Tier breakdown")
 st.dataframe(tiers, hide_index=True)
+
+# --- SECTION 4: review-policy curve ---
+# Question: if analysts review applications from riskiest to safest,
+# how much of the fraud do they catch as they work down the list?
+st.subheader("Review policy: how much fraud do we catch?")
+
+total_apps = len(filtered)
+total_fraud = int(filtered["is_fraud"].sum())  # True counts as 1, so sum = number of fraud cases
+
+# Guard: with some filters there may be no fraud at all, and dividing by 0 would crash
+if total_fraud == 0:
+    st.info("No fraud cases in the current filter, so there is nothing to catch.")
+else:
+    # One row per distinct score: how many applications and fraud cases have that score.
+    # CAST(... AS BIGINT) makes sure we get plain whole numbers back.
+    by_score = run_sql("""
+        SELECT risk_score,
+               COUNT(*)                                AS applications,
+               CAST(SUM(is_fraud::INT) AS BIGINT)      AS fraud_cases
+        FROM filtered
+        GROUP BY risk_score
+    """, filtered)
+
+    # Riskiest first, because analysts would review the highest scores first
+    by_score = by_score.sort_values("risk_score", ascending=False)
+
+    # cumsum() = running total. After the top-scoring rows, how much have we
+    # reviewed so far, and how much fraud is in that pile?
+    by_score["pct_reviewed"] = 100 * by_score["applications"].cumsum() / total_apps
+    by_score["pct_fraud_caught"] = 100 * by_score["fraud_cases"].cumsum() / total_fraud
+
+    fig2 = px.line(
+        by_score,
+        x="pct_reviewed",
+        y="pct_fraud_caught",
+        markers=True,
+        hover_data={"risk_score": True, "pct_reviewed": ":.1f", "pct_fraud_caught": ":.1f"},
+        labels={
+            "pct_reviewed": "% of applications reviewed",
+            "pct_fraud_caught": "% of all fraud caught",
+            "risk_score": "Review all with score ≥",
+        },
+        title="Fraud caught vs. review effort",
+    )
+    # Dashed diagonal = what random review would achieve (review 30%, catch 30%)
+    fig2.add_shape(type="line", x0=0, y0=0, x1=100, y1=100,
+                   line=dict(dash="dash", color="gray"))
+    fig2.update_xaxes(range=[0, 100])
+    fig2.update_yaxes(range=[0, 100])
+    st.plotly_chart(fig2)
+    st.caption("The further the line bows above the dashed diagonal, the better the score "
+               "is at putting fraud near the top of the review queue.")
