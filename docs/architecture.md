@@ -2,7 +2,8 @@
 
 **Repository:** https://github.com/SaminRahman/fintech-risk-engine
 **Stack:** Python, NumPy, pandas, DuckDB (SQL), Streamlit, Plotly
-**Status:** In development (started October 2026). Data pipeline and first SQL analysis complete; risk scoring and dashboard in progress.
+**Status:** In development (started October 2026). Data pipeline, SQL risk scoring and dashboard v1 are complete; interactive filters and review-policy analysis are in progress.
+**Last updated:** October 21, 2026
 
 ---
 
@@ -16,7 +17,7 @@ Risk teams need to answer three questions quickly:
 2. **Where is it concentrated?** (channel, device, account age, behaviour)
 3. **Which applications should be reviewed before shipping?** (risk scoring)
 
-This project builds an end-to-end analytics pipeline that answers those questions: it generates realistic application data, analyses it with SQL, scores risk with transparent rules, and presents the results in an interactive dashboard.
+This project builds an end-to-end analytics pipeline that answers those questions: it generates realistic application data, scores risk with transparent SQL rules, validates the score against outcomes, and presents the results in an interactive dashboard.
 
 **Domain context:** The risk signals were chosen from the author's four years of experience investigating device-financing fraud at a Canadian telecom provider.
 
@@ -26,7 +27,7 @@ This project builds an end-to-end analytics pipeline that answers those question
 
 Real customer data is private and cannot be published. Synthetic data lets the whole project be shared publicly, reproduced by anyone, and verified against known rules.
 
-**Important caveat:** because the fraud patterns were written into the generator, the SQL analysis *recovers* patterns that were planted rather than *discovering* unknown ones. The project demonstrates the pipeline, the analysis method and the validation habits, not new fraud findings. All results should be read as demonstrations on synthetic data.
+**Important caveat:** because the fraud patterns were written into the generator, the analysis *recovers* patterns that were planted rather than *discovering* unknown ones. The project demonstrates the pipeline, the analysis method and the validation habits, not new fraud findings. All results should be read as demonstrations on synthetic data.
 
 ---
 
@@ -37,10 +38,10 @@ Real customer data is private and cannot be published. Synthetic data lets the w
 ```mermaid
 flowchart LR
     A["generate_data.py<br/>NumPy + pandas"] --> B[("applications.csv<br/>5,000 rows")]
-    B --> C["first_query.py<br/>DuckDB SQL"]
-    C --> F["Fraud rate by channel"]
-    B --> D["Risk scoring in SQL<br/>(CASE WHEN) - planned"]
-    D --> E["Streamlit dashboard<br/>(Plotly charts) - planned"]
+    B --> C["first_query.py<br/>fraud rate by channel"]
+    B --> D["risk_score.py<br/>DuckDB SQL CASE WHEN"]
+    D --> E[("scored_applications.csv<br/>score + risk tier")]
+    E --> F["dashboard.py<br/>Streamlit + Plotly"]
 ```
 
 ### 3.2 Data generation logic
@@ -55,26 +56,49 @@ flowchart TD
     V --> P["Print row count and overall fraud rate"]
 ```
 
-### 3.3 Component responsibilities
+### 3.3 Risk scoring logic
+
+```mermaid
+flowchart TD
+    A["One application"] --> B["Check 5 red flags<br/>CASE WHEN per flag"]
+    B --> C["Add points into risk_score (0-100)"]
+    C --> D{"risk_score"}
+    D -->|"40 or more"| H["High"]
+    D -->|"15 to 39"| M["Medium"]
+    D -->|"under 15"| L["Low"]
+    H --> O["Compare tiers against is_fraud<br/>to validate the score"]
+    M --> O
+    L --> O
+```
+
+### 3.4 Component responsibilities
 
 | Component | Technology | Responsibility |
 |---|---|---|
 | `src/generate_data.py` | Python, NumPy, pandas | Creates 5,000 synthetic applications with embedded fraud patterns and saves a CSV |
-| `data/raw/applications.csv` | CSV (git-ignored) | The dataset; regenerated on demand from the seed |
-| `src/first_query.py` | Python, DuckDB SQL | Runs SQL directly on the CSV to compute fraud rate by channel |
-| Risk scoring layer | DuckDB SQL (`CASE WHEN`) | *Planned:* flags each application by risk tier |
-| `app/` dashboard | Streamlit, Plotly | *Planned:* interactive charts and filters |
+| `data/raw/applications.csv` | CSV (git-ignored) | The raw dataset; regenerated on demand from the seed |
+| `src/first_query.py` | Python, DuckDB SQL | Fraud rate by channel, run directly on the CSV |
+| `src/risk_score.py` | Python, DuckDB SQL | Scores every application with `CASE WHEN` rules, assigns a tier, saves the result and validates tiers against fraud |
+| `data/processed/scored_applications.csv` | CSV (git-ignored) | Raw data plus `risk_score` and `risk_tier` columns |
+| `app/dashboard.py` | Streamlit, Plotly, DuckDB | Interactive dashboard: KPIs, fraud rate by tier, tier breakdown table |
 | `requirements.txt` | pip | Pins library versions so the environment can be recreated |
 
-### 3.4 Repository structure
+### 3.5 Repository structure
 
 ```
 fintech-risk-engine/
-├── app/                  # Streamlit dashboard (planned)
-├── data/raw/             # Generated CSV (git-ignored, recreate with script)
+├── app/
+│   └── dashboard.py          # Streamlit dashboard
+├── data/
+│   ├── raw/                  # Generated CSV (git-ignored)
+│   └── processed/            # Scored CSV (git-ignored)
+├── docs/
+│   ├── architecture.md       # This document
+│   └── images/               # Dashboard screenshots
 ├── src/
-│   ├── generate_data.py  # Synthetic data generator
-│   └── first_query.py    # First DuckDB SQL analysis
+│   ├── generate_data.py      # Synthetic data generator
+│   ├── first_query.py        # First DuckDB SQL analysis
+│   └── risk_score.py         # SQL risk scoring and validation
 ├── .gitignore
 ├── README.md
 └── requirements.txt
@@ -84,7 +108,7 @@ fintech-risk-engine/
 
 ## 4. Data Dictionary
 
-Each row is one device-financing application.
+Each row is one device-financing application. The first ten columns come from the generator; the last two are added by the scoring step.
 
 | Column | Type | How it is generated | Meaning |
 |---|---|---|---|
@@ -98,12 +122,14 @@ Each row is one device-financing application.
 | `apps_last_24h` | integer | Poisson, mean 0.3 | Applications by this customer in the past 24 hours |
 | `address_mismatch` | boolean | True for about 8% of rows | Billing and shipping addresses differ |
 | `is_fraud` | boolean | Per-row coin flip against that row's risk (section 5) | Ground-truth fraud label |
+| `risk_score` | integer | Points from red flags (section 6) | Pre-outcome risk score, 0-100 |
+| `risk_tier` | text | Thresholds on `risk_score` (section 6) | Low, Medium or High |
 
 ---
 
-## 5. Fraud Risk Rules
+## 5. Fraud Generation Rules (the "ground truth")
 
-Each application starts with a **1% base fraud probability**. Each red flag adds to it:
+These rules decide which synthetic applications become fraud. Each application starts with a **1% base fraud probability**, and each red flag adds to it:
 
 | Red flag | Condition | Risk added | Rationale |
 |---|---|---|---|
@@ -136,7 +162,56 @@ A condition that is true counts as 1 and false counts as 0, so each flag adds it
 
 ---
 
-## 6. Expected Fraud Rate (Hand Calculation)
+## 6. Risk Scoring Model (what an analyst would build)
+
+The score is calculated **before** the outcome is known, so a reviewer could examine the riskiest applications first. Points are an analyst's judgment, scaled to 0-100. They are not copied from the generator's weights, because in real life the true weights are unknown and the score must be validated against outcomes.
+
+| Red flag | Condition | Points |
+|---|---|---|
+| Address mismatch | `address_mismatch = True` | 40 |
+| Burst of applications | `apps_last_24h >= 2` | 25 |
+| New account | `account_age_days < 30` | 20 |
+| Online channel | `channel = 'online'` | 10 |
+| High-value device | `device_price >= 1400` | 5 |
+| **Maximum** | | **100** |
+
+| Tier | Score |
+|---|---|
+| High | 40 or more |
+| Medium | 15 to 39 |
+| Low | under 15 |
+
+### The SQL
+
+```sql
+WITH scored AS (
+    SELECT *,
+           (CASE WHEN channel = 'online'      THEN 10 ELSE 0 END
+          + CASE WHEN device_price >= 1400    THEN 5  ELSE 0 END
+          + CASE WHEN account_age_days < 30   THEN 20 ELSE 0 END
+          + CASE WHEN apps_last_24h >= 2      THEN 25 ELSE 0 END
+          + CASE WHEN address_mismatch        THEN 40 ELSE 0 END
+           ) AS risk_score
+    FROM 'data/raw/applications.csv'
+)
+SELECT *,
+       CASE WHEN risk_score >= 40 THEN 'High'
+            WHEN risk_score >= 15 THEN 'Medium'
+            ELSE 'Low'
+       END AS risk_tier
+FROM scored
+```
+
+| SQL piece | What it does |
+|---|---|
+| `CASE WHEN ... THEN ... ELSE ... END` | SQL's if/else; gives points when a flag applies |
+| `WITH scored AS (...)` | A named first step (a CTE) that the second step builds on |
+| Tier `CASE` block | Checks top to bottom and stops at the first match, so High is listed first |
+| `COPY (...) TO 'file.csv'` | Writes the scored result to `data/processed/` |
+
+---
+
+## 7. Expected Fraud Rate (Hand Calculation)
 
 The expected overall fraud rate is the sum of (how often each flag occurs) x (risk it adds):
 
@@ -154,11 +229,13 @@ With 5,000 rows, normal random variation is about +/-0.25 percentage points, so 
 
 ---
 
-## 7. Results So Far
+## 8. Results
 
-**Overall:** 5,000 applications, 178 fraud cases, **3.56% fraud rate** (within normal variation of the 3.34% expected).
+### 8.1 Overall
 
-**Fraud rate by channel** (`src/first_query.py`):
+5,000 applications, 178 fraud cases, **3.56% fraud rate** (within normal variation of the 3.34% expected).
+
+### 8.2 Fraud rate by channel
 
 | Channel | Applications | Fraud cases | Fraud rate |
 |---|---|---|---|
@@ -167,40 +244,63 @@ With 5,000 rows, normal random variation is about +/-0.25 percentage points, so 
 | call_center | 970 | 22 | 2.27% |
 | **Total** | **5,000** | **178** | **3.56%** |
 
-**Finding:** online applications are about twice as likely to be fraudulent as call-center applications (4.97% vs 2.27%), consistent with the +2% online risk rule.
+Online applications are about twice as likely to be fraudulent as call-center applications, consistent with the +2% online rule.
 
-### The SQL behind it
+### 8.3 Fraud rate by risk tier (does the score work?)
 
-```sql
-SELECT channel,
-       COUNT(*)                              AS applications,
-       SUM(is_fraud::INT)                    AS fraud_cases,
-       ROUND(100.0 * AVG(is_fraud::INT), 2)  AS fraud_rate_pct
-FROM 'data/raw/applications.csv'
-GROUP BY channel
-ORDER BY fraud_rate_pct DESC
-```
+| Risk tier | Applications | Share of applications | Fraud cases | Fraud rate |
+|---|---|---|---|---|
+| High | 431 | 8.6% | 46 | 10.67% |
+| Medium | 1,053 | 21.1% | 54 | 5.13% |
+| Low | 3,516 | 70.3% | 78 | 2.22% |
+| **Total** | **5,000** | **100%** | **178** | **3.56%** |
 
-| SQL piece | What it does |
-|---|---|
-| `FROM 'file.csv'` | DuckDB reads the CSV directly as a table, with no database server |
-| `GROUP BY channel` | Sorts rows into one pile per channel |
-| `COUNT(*)` | Rows in each pile |
-| `is_fraud::INT` | Converts True/False to 1/0 |
-| `SUM(...)` | Adds the 1s to count fraud cases |
-| `AVG(...)` | Averages 1s and 0s to give the fraud share |
-| `ORDER BY ... DESC` | Riskiest channel first |
+The rate climbs from Low to Medium to High, which is what a working score should do. A High-tier application is about **4.8x** as likely to be fraud as a Low-tier one and about **3x** the overall average.
+
+### 8.4 Review-policy trade-off
+
+If a fraud team manually reviews only the highest-risk applications:
+
+| Review policy | Applications reviewed | Fraud caught | Share of all fraud caught | Fraud rate among reviewed |
+|---|---|---|---|---|
+| High only | 431 (8.6%) | 46 | 25.8% | 10.67% |
+| High + Medium | 1,484 (29.7%) | 100 | 56.2% | 6.74% |
+| Everyone | 5,000 (100%) | 178 | 100% | 3.56% |
+
+Reviewing High + Medium covers 30% of applications but catches 56% of fraud, so each review is about 1.9x as productive as a random one. Reviewing High only is 3x as productive but misses about three quarters of the fraud. This is the core trade-off in fraud operations: **review effort against fraud caught**. About 9 in 10 High-tier applications are still genuine customers (false positives), which teams accept because a missed fraud costs the device price while an unnecessary review costs minutes.
 
 ---
 
-## 8. Validation and Quality Checks
+## 9. Dashboard
+
+**Version 1 (done):** four KPI tiles (applications, fraud cases, fraud rate, high-risk share), a bar chart of fraud rate by risk tier, and a tier breakdown table. All numbers come from live DuckDB SQL over the scored CSV.
+
+![Dashboard v1](images/dashboard-v1.png)
+
+**Version 2 (in progress):** sidebar filters for channel, device and application date, with every KPI and chart recalculating on the filtered rows.
+
+**Planned:** a review-policy chart ("if we review the top X% of applications, how much fraud do we catch?") and a fraud-rate view by individual red flag.
+
+Run it with:
+
+```bash
+streamlit run app/dashboard.py
+```
+
+---
+
+## 10. Validation and Quality Checks
 
 | Check | Method | Result |
 |---|---|---|
-| Row totals tie out | Channel application counts sum to 5,000 | Passed (1,770 + 2,260 + 970) |
-| Fraud counts tie out | Channel fraud cases sum to overall total | Passed (88 + 68 + 22 = 178) |
+| Channel counts tie out | Application counts sum to 5,000 | Passed (1,770 + 2,260 + 970) |
+| Channel fraud ties out | Fraud cases sum to the overall total | Passed (88 + 68 + 22 = 178) |
+| Tier counts tie out | Tier applications sum to 5,000 | Passed (431 + 1,053 + 3,516) |
+| Tier fraud ties out | Tier fraud cases sum to the overall total | Passed (46 + 54 + 78 = 178) |
 | Overall rate matches hand calculation | Compare to the 3.34% expectation | Passed (3.56%, within normal variation) |
 | Binary flag is populated correctly | `value_counts()` on `address_mismatch` | Passed (395 True, 4,605 False, about 8%) |
+| Score ranks risk correctly | Fraud rate rises Low < Medium < High | Passed (2.22% < 5.13% < 10.67%) |
+| Dashboard matches the terminal | KPI tiles equal the script output | Passed (5,000 / 178 / 3.56% / 8.6%) |
 | Reproducibility | Fixed seed of 42 | Same data on every run |
 
 ### Bug log
@@ -208,37 +308,43 @@ ORDER BY fraud_rate_pct DESC
 | Bug | Symptom | Root cause | Fix |
 |---|---|---|---|
 | `address_mismatch` always False | Overall fraud rate 2.64%, below the expected 3.34% | `rng.choice(N) < 0.08` returns **one** random number and one True/False, which pandas copied to all rows. Should be `rng.random(N) < 0.08`, which gives 5,000 independent values | Corrected the line and verified with `value_counts()` |
+| Missing comma in DataFrame definition | `SyntaxError: Perhaps you forgot a comma?` | A dictionary entry was missing its trailing comma; Python reported the error on the following line | Added the comma |
 
-**How it was caught:** the hand calculation predicted about 3.3%, but the run gave 2.64%, almost exactly the 2.70% expected with the address rule switched off. A gap that large and that specific pointed to one missing rule, and a column check confirmed it. The lesson: a bug that raises no error can only be caught by checking outputs against expectations.
+**How the first bug was caught:** the hand calculation predicted about 3.3%, but the run gave 2.64%, almost exactly the 2.70% expected with the address rule switched off. A gap that large and that specific pointed to one missing rule, and a column check confirmed it. The lesson: a bug that raises no error can only be caught by checking outputs against expectations.
 
 ---
 
-## 9. Known Limitations
+## 11. Known Limitations
 
 - Data is synthetic, and fraud patterns are planted rather than observed.
+- The score uses the same red flags the generator used, so part of its performance is built in. The value shown is the method: build a score, then validate it against outcomes.
+- Score points and tier cutoffs were chosen by judgment and evaluated on the same data; there is no held-out test set.
 - Fraud rules are additive and independent; real fraud involves interactions between signals (for example, a new account that is also online).
 - Only six risk signals are modelled; real systems use many more (device fingerprints, IP address, velocity across accounts).
-- Risk scoring is rule-based, with no machine learning model.
+- Scoring is rule-based, with no machine learning model.
 - No fraud-loss dollar amounts yet; the analysis counts cases rather than money.
 
 ---
 
-## 10. Roadmap
+## 12. Roadmap
 
 | Phase | Deliverable | Status |
 |---|---|---|
 | Setup | Git, GitHub, Python environment, dependencies | Done |
 | Data | Synthetic data generator with embedded fraud patterns | Done |
 | Analysis | First DuckDB query: fraud rate by channel | Done |
-| Analysis | Fraud rate by device, account age, address mismatch, credit score band | Next |
-| Scoring | Rule-based risk score and risk tiers in SQL (`CASE WHEN`) | Planned |
-| Dashboard | Streamlit app with KPIs, charts and filters | Planned |
+| Scoring | Rule-based risk score and tiers in SQL (`CASE WHEN`), validated against fraud | Done |
+| Dashboard | Streamlit v1: KPIs, fraud rate by tier, tier table | Done |
+| Documentation | Architecture document in repo and README preview screenshot | Done |
+| Dashboard | Sidebar filters (channel, device, date) | In progress |
+| Dashboard | Review-policy chart (review top X%, fraud caught) | Next |
+| Analysis | Fraud rate by individual red flag and credit-score band | Planned |
 | Impact | Estimated fraud loss prevented at different review thresholds | Planned |
-| Release | Deployed live demo and polished README with screenshots | Planned |
+| Release | Deployed live demo and polished README | Planned |
 
 ---
 
-## 11. How to Run
+## 13. How to Run
 
 ```bash
 # 1. Clone and enter the project
@@ -255,17 +361,21 @@ pip install -r requirements.txt
 # 4. Generate the data
 python src/generate_data.py
 
-# 5. Run the first analysis
-python src/first_query.py
+# 5. Score the applications and validate the tiers
+python src/risk_score.py
+
+# 6. Launch the dashboard
+streamlit run app/dashboard.py
 ```
 
 ---
 
-## 12. Skills Demonstrated
+## 14. Skills Demonstrated
 
 - **Python:** NumPy random generation, pandas DataFrames, file handling
-- **SQL (DuckDB):** aggregation, grouping, type casting, querying CSVs directly
-- **Analytics:** fraud-rate metrics, hand-estimating expected results, tying out totals
+- **SQL (DuckDB):** aggregation, grouping, type casting, `CASE WHEN` scoring, CTEs, querying CSVs directly
+- **Analytics:** fraud-rate metrics, risk tiers, review-policy trade-offs, hand-estimating expected results, tying out totals
 - **Data validation:** debugging a silent data bug using expectation checks
+- **Dashboarding:** Streamlit and Plotly with live SQL
 - **Engineering practice:** Git and GitHub workflow, reproducible environment, documentation
 - **Domain knowledge:** fraud signals drawn from real device-financing investigations
