@@ -55,6 +55,7 @@ tiers = run_query(f"""
            ROUND(100.0 * AVG(is_fraud::INT), 2)  AS fraud_rate_pct
     FROM '{DATA}'
     GROUP BY risk_tier
+    ORDER BY CASE risk_tier WHEN 'High' THEN 1 WHEN 'Medium' THEN 2 ELSE 3 END
 """)
 
 fig = px.bar(

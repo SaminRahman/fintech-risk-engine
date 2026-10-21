@@ -14,11 +14,14 @@ I spent 4 years at Rogers investigating device-financing fraud. This project tur
 See the full [Project Architecture](docs/architecture.md) for the problem statement, data dictionary, risk rules, results and validation checks.
 
 ## Roadmap
-- [ ] Synthetic data generator
-- [ ] SQL fraud analysis (by channel, device, account age)
-- [ ] Rule-based risk scoring
+- [x] Synthetic data generator
+- [x] SQL fraud analysis (by channel, device, account age)
+- [x] Rule-based risk scoring
 - [ ] Streamlit dashboard
 - [ ] Deployed live demo
+
+## Dashboard preview
+![Dashboard v1](docs/images/dashboard-v1.png)
 
 ## Status
 In active development (started October 2026).
