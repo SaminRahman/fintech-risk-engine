@@ -17,14 +17,20 @@ See the full [Project Architecture](docs/architecture.md) for the problem statem
 - [x] Synthetic data generator
 - [x] SQL fraud analysis (by channel, device, account age)
 - [x] Rule-based risk scoring
-- [ ] Streamlit dashboard
+- [x] Streamlit dashboard
 - [ ] Deployed live demo
 
 ## Dashboard preview
 ![Dashboard v1](docs/images/dashboard-v1.png)
+![Dashboard v2](docs/images/dashboard-v2.png)
 
 ## Status
 In active development (started October 2026).
+
+## Key findings (synthetic data)
+- A rule-based risk score ranks fraud correctly: High-tier applications are 4.8x as likely to be fraud as Low-tier ones.
+- Reviewing the riskiest 30% of applications catches 56% of fraud.
+- Address mismatch is the strongest red flag (3.7x lift). Credit score, which the data generator ignores, shows no detectable relationship, a check that the analysis doesn't invent patterns.
 
 ## Author
 Samin Yasar Rahman, https://www.linkedin.com/in/saminrahman/

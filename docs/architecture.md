@@ -2,8 +2,8 @@
 
 **Repository:** https://github.com/SaminRahman/fintech-risk-engine
 **Stack:** Python, NumPy, pandas, DuckDB (SQL), Streamlit, Plotly
-**Status:** In development (started October 2026). Data pipeline, SQL risk scoring and dashboard v1 are complete; interactive filters and review-policy analysis are in progress.
-**Last updated:** October 21, 2026
+**Status:** In development (started October 2026). Data pipeline, SQL risk scoring and an interactive dashboard (sidebar filters, review-policy curve, red-flag lift analysis and a credit-score check) are complete; dollar-impact analysis is next.
+**Last updated:** October 22, 2026
 
 ---
 
@@ -80,7 +80,7 @@ flowchart TD
 | `src/first_query.py` | Python, DuckDB SQL | Fraud rate by channel, run directly on the CSV |
 | `src/risk_score.py` | Python, DuckDB SQL | Scores every application with `CASE WHEN` rules, assigns a tier, saves the result and validates tiers against fraud |
 | `data/processed/scored_applications.csv` | CSV (git-ignored) | Raw data plus `risk_score` and `risk_tier` columns |
-| `app/dashboard.py` | Streamlit, Plotly, DuckDB | Interactive dashboard: KPIs, fraud rate by tier, tier breakdown table |
+| `app/dashboard.py` | Streamlit, Plotly, DuckDB | Interactive dashboard: sidebar filters, KPIs, fraud rate by tier, review-policy curve, fraud lift by red flag, credit-score check |
 | `requirements.txt` | pip | Pins library versions so the environment can be recreated |
 
 ### 3.5 Repository structure
@@ -158,7 +158,7 @@ A condition that is true counts as 1 and false counts as 0, so each flag adds it
 **Worked example:** an online order for a $1,400 phone on a 10-day-old account with no other flags:
 0.01 + 0.02 + 0.015 + 0.03 = **0.075 (7.5%)**.
 
-**Design note:** `credit_score` is generated as a realistic feature but is deliberately *not* part of the fraud formula. A later analysis should show it has no relationship with fraud, which is a useful test that the analysis does not invent patterns.
+**Design note:** `credit_score` is generated as a realistic feature but is deliberately *not* part of the fraud formula. Section 8.6 shows it has no detectable relationship with fraud, which is a useful test that the analysis does not invent patterns.
 
 ---
 
@@ -231,6 +231,13 @@ With 5,000 rows, normal random variation is about +/-0.25 percentage points, so 
 
 ## 8. Results
 
+**Key findings (synthetic data):**
+
+- The overall fraud rate is 3.56%, and online applications are about twice as risky as call-center applications.
+- The rule-based score ranks risk correctly: High-tier applications are 4.8x as likely to be fraud as Low-tier ones.
+- Reviewing the riskiest 30% of applications catches 56% of fraud.
+- Address mismatch is the strongest single red flag (3.7x lift). Credit score, which the generator ignores, shows no detectable relationship with fraud.
+
 ### 8.1 Overall
 
 5,000 applications, 178 fraud cases, **3.56% fraud rate** (within normal variation of the 3.34% expected).
@@ -269,6 +276,35 @@ If a fraud team manually reviews only the highest-risk applications:
 
 Reviewing High + Medium covers 30% of applications but catches 56% of fraud, so each review is about 1.9x as productive as a random one. Reviewing High only is 3x as productive but misses about three quarters of the fraud. This is the core trade-off in fraud operations: **review effort against fraud caught**. About 9 in 10 High-tier applications are still genuine customers (false positives), which teams accept because a missed fraud costs the device price while an unnecessary review costs minutes.
 
+### 8.5 Fraud rate by red flag (lift)
+
+For each flag, the fraud rate among applications that have it versus those that do not. **Lift** is the ratio of the two.
+
+| Red flag | Applications with flag | Fraud rate with flag | Fraud rate without | Lift |
+|---|---|---|---|---|
+| Address mismatch | 395 | 10.89% | 2.93% | 3.7x |
+| Account under 30 days | 49 | 10.20% | 3.49% | 2.9x |
+| 2+ applications in 24h | 181 | 6.63% | 3.44% | 1.9x |
+| Online channel | 1,770 | 4.97% | 2.79% | 1.8x |
+| Device $1,400+ | 2,768 | 4.30% | 2.64% | 1.6x |
+
+Address mismatch is clearly the strongest signal, consistent with its +8% rule. Observed rates sit close to the 10.7%, 7.2%, 4.6% and 4.0% that the generator rules imply for the address, burst, online and device flags.
+
+**Sample-size caution:** only 49 applications have the new-account flag, and 5 of them were fraud, so its rate (10.2%) is far noisier than the others. Its normal random wobble is about +/-8.6 percentage points, which comfortably includes the roughly 6.3% the rules imply. Its apparent rank (second) should not be trusted. A rate must always be read next to its count.
+
+### 8.6 Credit-score check (does the analysis invent patterns?)
+
+Credit score is generated realistically but is not used in the fraud rules, so no relationship should appear.
+
+| Credit score band | Applications | Fraud cases | Fraud rate | Normal wobble (+/-) |
+|---|---|---|---|---|
+| Under 580 | 645 | 22 | 3.41% | 1.43 |
+| 580-669 | 1,888 | 73 | 3.87% | 0.89 |
+| 670-739 | 1,525 | 55 | 3.61% | 0.96 |
+| 740+ | 942 | 28 | 2.97% | 1.11 |
+
+The overall rate is 3.56%. Every band's error range includes it, so the differences are consistent with random noise: **no detectable relationship**. That is weaker than "proven unrelated"; a different random seed would reorder the bars. The wobble is about two standard errors, calculated as 200 x sqrt(p x (1 - p) / n) in percentage points.
+
 ---
 
 ## 9. Dashboard
@@ -277,9 +313,17 @@ Reviewing High + Medium covers 30% of applications but catches 56% of fraud, so 
 
 ![Dashboard v1](images/dashboard-v1.png)
 
-**Version 2 (in progress):** sidebar filters for channel, device and application date, with every KPI and chart recalculating on the filtered rows.
+**Version 2 (done):** sidebar filters for channel, device and application date; every KPI and chart recalculates on the filtered rows.
 
-**Planned:** a review-policy chart ("if we review the top X% of applications, how much fraud do we catch?") and a fraud-rate view by individual red flag.
+**Review-policy curve (done):** plots the cumulative share of fraud caught against the cumulative share of applications reviewed, riskiest first, with a dashed diagonal showing random review. Its points reproduce the table in section 8.4 (about 9% reviewed catches about 26% of fraud; about 30% reviewed catches about 56%), and it stays above the random-review diagonal throughout.
+
+**Fraud drivers (done):** grouped bars compare the fraud rate with and without each red flag, with a table of counts and lift (section 8.5).
+
+**Credit-score check (done):** fraud rate by credit-score band with error bars (about two standard errors) and a dashed overall-rate line (section 8.6).
+
+![Dashboard v2](images/dashboard-v2.png)
+
+**Planned:** a dollar-impact section: given a cost per manual review and a review catch rate, which review cutoff maximises net savings?
 
 Run it with:
 
@@ -301,6 +345,10 @@ streamlit run app/dashboard.py
 | Binary flag is populated correctly | `value_counts()` on `address_mismatch` | Passed (395 True, 4,605 False, about 8%) |
 | Score ranks risk correctly | Fraud rate rises Low < Medium < High | Passed (2.22% < 5.13% < 10.67%) |
 | Dashboard matches the terminal | KPI tiles equal the script output | Passed (5,000 / 178 / 3.56% / 8.6%) |
+| Review-policy curve matches the table | Compare curve points to section 8.4 | Passed (about 9% reviewed / 26% caught; about 30% / 56%) |
+| Red-flag counts tie out | Flag counts equal totals known from earlier checks | Passed (address mismatch 395 matches `value_counts()`; online 1,770 matches the channel table) |
+| Red-flag rates match rules-based expectation | Compare observed rates to rates implied by the generator rules | Passed, except the new-account flag (49 applications), which is explained by sampling noise |
+| Credit score shows no pattern | Every band's error range includes the overall rate | Passed (consistent with the generator ignoring credit score) |
 | Reproducibility | Fixed seed of 42 | Same data on every run |
 
 ### Bug log
@@ -322,6 +370,7 @@ streamlit run app/dashboard.py
 - Fraud rules are additive and independent; real fraud involves interactions between signals (for example, a new account that is also online).
 - Only six risk signals are modelled; real systems use many more (device fingerprints, IP address, velocity across accounts).
 - Scoring is rule-based, with no machine learning model.
+- Rates for flags with few applications (for example the 49 new-account applications) are noisy; firm conclusions about them would need larger samples.
 - No fraud-loss dollar amounts yet; the analysis counts cases rather than money.
 
 ---
@@ -336,11 +385,12 @@ streamlit run app/dashboard.py
 | Scoring | Rule-based risk score and tiers in SQL (`CASE WHEN`), validated against fraud | Done |
 | Dashboard | Streamlit v1: KPIs, fraud rate by tier, tier table | Done |
 | Documentation | Architecture document in repo and README preview screenshot | Done |
-| Dashboard | Sidebar filters (channel, device, date) | In progress |
-| Dashboard | Review-policy chart (review top X%, fraud caught) | Next |
-| Analysis | Fraud rate by individual red flag and credit-score band | Planned |
-| Impact | Estimated fraud loss prevented at different review thresholds | Planned |
-| Release | Deployed live demo and polished README | Planned |
+| Dashboard | Sidebar filters (channel, device, date) | Done |
+| Dashboard | Review-policy curve (review top X%, fraud caught) | Done |
+| Analysis | Fraud rate and lift by individual red flag; credit-score check | Done |
+| Impact | Dollar impact: net savings at different review cutoffs, with adjustable review cost and catch rate | Next |
+| Quality | Code clean-up into functions, comments and a small test | Planned |
+| Release | Dashboard polish, deployed live demo and polished README | Planned |
 
 ---
 
@@ -374,7 +424,8 @@ streamlit run app/dashboard.py
 
 - **Python:** NumPy random generation, pandas DataFrames, file handling
 - **SQL (DuckDB):** aggregation, grouping, type casting, `CASE WHEN` scoring, CTEs, querying CSVs directly
-- **Analytics:** fraud-rate metrics, risk tiers, review-policy trade-offs, hand-estimating expected results, tying out totals
+- **Analytics:** fraud-rate metrics, risk tiers, lift analysis, review-policy trade-offs, hand-estimating expected results, tying out totals
+- **Statistical thinking:** sample-size caution, error bars (about two standard errors), testing that an analysis does not invent patterns
 - **Data validation:** debugging a silent data bug using expectation checks
 - **Dashboarding:** Streamlit and Plotly with live SQL
 - **Engineering practice:** Git and GitHub workflow, reproducible environment, documentation
