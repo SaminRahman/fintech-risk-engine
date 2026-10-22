@@ -171,3 +171,111 @@ else:
     st.plotly_chart(fig2)
     st.caption("The further the line bows above the dashed diagonal, the better the score "
                "is at putting fraud near the top of the review queue.")
+
+# --- SECTION 5: what drives fraud? (fraud rate with vs. without each red flag) ---
+st.subheader("What drives fraud? Fraud rate with vs. without each red flag")
+
+# Five small queries stacked with UNION ALL. Each answers:
+# "does THIS application have THIS flag?" (has_flag = True/False).
+# GROUP BY flag then compares the fraud rate of rows WITH the flag to rows WITHOUT it.
+# AVG(...) FILTER (WHERE ...) = "average, but only over rows where the condition is true".
+flags = run_sql("""
+    SELECT flag,
+           CAST(SUM(has_flag::INT) AS BIGINT)                                AS apps_with_flag,
+           ROUND(100.0 * AVG(is_fraud::INT) FILTER (WHERE has_flag), 2)      AS rate_with_flag,
+           ROUND(100.0 * AVG(is_fraud::INT) FILTER (WHERE NOT has_flag), 2)  AS rate_without_flag
+    FROM (
+        SELECT 'Address mismatch' AS flag, address_mismatch AS has_flag, is_fraud FROM filtered
+        UNION ALL
+        SELECT '2+ applications in 24h', apps_last_24h >= 2, is_fraud FROM filtered
+        UNION ALL
+        SELECT 'Account under 30 days', account_age_days < 30, is_fraud FROM filtered
+        UNION ALL
+        SELECT 'Online channel', channel = 'online', is_fraud FROM filtered
+        UNION ALL
+        SELECT 'Device $1,400+', device_price >= 1400, is_fraud FROM filtered
+    ) AS stacked
+    GROUP BY flag
+""", filtered)
+
+# lift = how many times riskier the flagged applications are (rate with ÷ rate without).
+# If "without" is 0 the division gives infinity, so we swap that for "not a number".
+flags["lift"] = (
+    (flags["rate_with_flag"] / flags["rate_without_flag"])
+    .replace([float("inf")], float("nan"))
+    .round(1)
+)
+flags = flags.sort_values("lift", ascending=False)  # strongest flag first
+
+# The chart wants "long" format: one row per (flag, present/absent) pair. melt() does that.
+long = flags.melt(
+    id_vars="flag",
+    value_vars=["rate_with_flag", "rate_without_flag"],
+    var_name="group",
+    value_name="fraud_rate_pct",
+)
+long["group"] = long["group"].map({"rate_with_flag": "Flag present", "rate_without_flag": "Flag absent"})
+
+fig3 = px.bar(
+    long,
+    x="flag",
+    y="fraud_rate_pct",
+    color="group",
+    barmode="group",  # side-by-side bars instead of stacked
+    text="fraud_rate_pct",
+    category_orders={"flag": list(flags["flag"])},
+    color_discrete_map={"Flag present": "#c62828", "Flag absent": "#9e9e9e"},
+    labels={"flag": "Red flag", "fraud_rate_pct": "Fraud rate (%)", "group": ""},
+    title="Fraud rate with vs. without each red flag",
+)
+st.plotly_chart(fig3)
+
+st.dataframe(
+    flags[["flag", "apps_with_flag", "rate_with_flag", "rate_without_flag", "lift"]],
+    hide_index=True,
+)
+st.caption("Always read the rate next to the count. A flag that only a few dozen applications "
+           "have can look very strong or very weak purely by chance.")
+
+
+# --- SECTION 6: credit score check (we expect NO pattern) ---
+# Our generator did NOT use credit score to decide fraud. If this chart showed a clear
+# pattern, our analysis would be inventing one. This is a test of the analysis itself.
+st.subheader("Credit score check: is it related to fraud?")
+
+bands = run_sql("""
+    SELECT CASE WHEN credit_score < 580 THEN 'Under 580'
+                WHEN credit_score < 670 THEN '580-669'
+                WHEN credit_score < 740 THEN '670-739'
+                ELSE '740+'
+           END                                   AS credit_band,
+           COUNT(*)                              AS applications,
+           CAST(SUM(is_fraud::INT) AS BIGINT)    AS fraud_cases,
+           ROUND(100.0 * AVG(is_fraud::INT), 2)  AS fraud_rate_pct
+    FROM filtered
+    GROUP BY credit_band
+    ORDER BY MIN(credit_score)
+""", filtered)
+
+# "Normal wobble": roughly +/- 2 standard errors, in percentage points.
+# Smaller groups wobble more, so their error bars come out longer.
+p = bands["fraud_rate_pct"] / 100
+bands["plus_minus_pct"] = (200 * (p * (1 - p) / bands["applications"]) ** 0.5).round(2)
+
+overall_rate = 100 * filtered["is_fraud"].mean()  # overall fraud rate for the current filters
+
+fig4 = px.bar(
+    bands,
+    x="credit_band",
+    y="fraud_rate_pct",
+    error_y="plus_minus_pct",  # the whiskers show normal wobble
+    text="fraud_rate_pct",
+    category_orders={"credit_band": list(bands["credit_band"])},
+    labels={"credit_band": "Credit score band", "fraud_rate_pct": "Fraud rate (%)"},
+    title="Fraud rate by credit-score band (whiskers = normal wobble)",
+)
+fig4.add_hline(y=overall_rate, line_dash="dash", line_color="gray", annotation_text="Overall rate")
+st.plotly_chart(fig4)
+st.dataframe(bands, hide_index=True)
+st.caption("If every bar's whisker reaches the dashed line, the differences between bands "
+           "are within normal random wobble: no detectable relationship.")
