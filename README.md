@@ -32,5 +32,13 @@ In active development (started October 2026).
 - Reviewing the riskiest 30% of applications catches 56% of fraud.
 - Address mismatch is the strongest red flag (3.7x lift). Credit score, which the data generator ignores, shows no detectable relationship, a check that the analysis doesn't invent patterns.
 
+## Run the tests
+```bash
+python src/generate_data.py
+python src/risk_score.py
+python -m pytest
+```
+The tests check the generated data, the scoring rules (including that the Python rules agree with the SQL) and the dashboard's calculations.
+
 ## Author
 Samin Yasar Rahman, https://www.linkedin.com/in/saminrahman/
