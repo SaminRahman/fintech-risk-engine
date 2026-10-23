@@ -279,3 +279,73 @@ st.plotly_chart(fig4)
 st.dataframe(bands, hide_index=True)
 st.caption("If every bar's whisker reaches the dashed line, the differences between bands "
            "are within normal random wobble: no detectable relationship.")
+
+# --- SECTION 7: dollar impact (which review policy saves the most money?) ---
+st.subheader("Dollar impact: which review policy saves the most money?")
+st.caption("Assumptions: a fraud that gets through costs the full device price, and a manual "
+           "review costs the same no matter who is reviewed. Move the sliders to test other assumptions.")
+
+# Two sliders side by side. Moving either one reruns this whole section.
+s1, s2 = st.columns(2)
+review_cost = s1.slider("Cost per manual review ($)", 5, 100, 25, step=5)
+catch_rate = s2.slider("Share of fraud a review catches (%)", 50, 100, 90, step=5) / 100
+
+# One row per distinct risk score: applications, fraud cases and fraud DOLLARS.
+# CASE WHEN is_fraud THEN device_price ELSE 0 END = "count the price only when it was fraud".
+money = run_sql("""
+    SELECT risk_score,
+           COUNT(*)                                                             AS applications,
+           CAST(SUM(is_fraud::INT) AS BIGINT)                                   AS fraud_cases,
+           CAST(SUM(CASE WHEN is_fraud THEN device_price ELSE 0 END) AS BIGINT) AS fraud_loss
+    FROM filtered
+    GROUP BY risk_score
+""", filtered)
+
+total_fraud_loss = int(money["fraud_loss"].sum())
+
+# Riskiest first, then running totals: "if we review everyone with a score of at least this..."
+money = money.sort_values("risk_score", ascending=False)
+money["reviewed"] = money["applications"].cumsum()
+money["pct_reviewed"] = 100 * money["reviewed"] / money["applications"].sum()
+money["loss_prevented"] = catch_rate * money["fraud_loss"].cumsum()
+money["review_total"] = review_cost * money["reviewed"]
+money["net_benefit"] = money["loss_prevented"] - money["review_total"]
+
+# The best policy is the row with the highest net benefit (idxmax = "index of the maximum").
+best = money.loc[money["net_benefit"].idxmax()]
+
+if best["net_benefit"] <= 0:
+    st.info("At these costs, manual review loses money, so the best policy is to review nobody.")
+else:
+    k1, k2, k3, k4 = st.columns(4)
+    k1.metric("Best policy", f"Review score ≥ {int(best['risk_score'])}")
+    k2.metric("Applications reviewed", f"{best['pct_reviewed']:.1f}%")
+    k3.metric("Fraud loss prevented", f"${best['loss_prevented']:,.0f}")
+    k4.metric("Net benefit after review costs", f"${best['net_benefit']:,.0f}")
+
+fig5 = px.line(
+    money,
+    x="pct_reviewed",
+    y="net_benefit",
+    markers=True,
+    hover_data={"risk_score": True, "pct_reviewed": ":.1f", "net_benefit": ":,.0f"},
+    labels={
+        "pct_reviewed": "% of applications reviewed",
+        "net_benefit": "Net benefit ($)",
+        "risk_score": "Review all with score ≥",
+    },
+    title="Net benefit of each review cutoff",
+)
+# Dashed line at $0 = what you get by reviewing nobody
+fig5.add_hline(y=0, line_dash="dash", line_color="gray", annotation_text="Review nobody")
+if best["net_benefit"] > 0:
+    fig5.add_annotation(x=best["pct_reviewed"], y=best["net_benefit"],
+                        text="Best", showarrow=True, arrowhead=2)
+st.plotly_chart(fig5)
+
+st.caption(f"Total fraud loss if nobody is reviewed: {total_fraud_loss:,} dollars.")
+st.dataframe(
+    money[["risk_score", "applications", "fraud_cases", "fraud_loss", "pct_reviewed",
+           "loss_prevented", "review_total", "net_benefit"]].round(1),
+    hide_index=True,
+)
