@@ -4,6 +4,8 @@ A fraud-risk analytics project that scores device-financing applications, finds 
 
 > Built by a former telecom fraud investigator. The data is **synthetic** (5,000 generated applications with planted fraud patterns), so the point is the method, not the numbers.
 
+**[Live demo](https://telecomfraud-risk-engine.streamlit.app/)**
+
 ![Dashboard](docs/images/dashboard-v3.png)
 
 ## What it does
