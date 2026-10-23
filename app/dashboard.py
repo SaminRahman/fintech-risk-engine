@@ -3,11 +3,16 @@ dashboard.py (version 2: sidebar filters)
 Run with:  streamlit run app/dashboard.py
 """
 
+import sys
 from pathlib import Path
 
 import duckdb
 import plotly.express as px
 import streamlit as st
+# Streamlit only knows about the app/ folder, so tell Python where the project root is.
+# That lets us write "from src.metrics import ...".
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from src.metrics import lift, net_benefit_table, wobble_pct  # noqa: E402
 import pandas as pd
 
 DATA = "data/processed/scored_applications.csv"
@@ -198,13 +203,8 @@ flags = run_sql("""
     GROUP BY flag
 """, filtered)
 
-# lift = how many times riskier the flagged applications are (rate with ÷ rate without).
-# If "without" is 0 the division gives infinity, so we swap that for "not a number".
-flags["lift"] = (
-    (flags["rate_with_flag"] / flags["rate_without_flag"])
-    .replace([float("inf")], float("nan"))
-    .round(1)
-)
+# lift = how many times riskier the flagged applications are (see src/metrics.py)
+flags["lift"] = lift(flags["rate_with_flag"], flags["rate_without_flag"]).round(1)
 flags = flags.sort_values("lift", ascending=False)  # strongest flag first
 
 # The chart wants "long" format: one row per (flag, present/absent) pair. melt() does that.
@@ -257,10 +257,8 @@ bands = run_sql("""
     ORDER BY MIN(credit_score)
 """, filtered)
 
-# "Normal wobble": roughly +/- 2 standard errors, in percentage points.
-# Smaller groups wobble more, so their error bars come out longer.
-p = bands["fraud_rate_pct"] / 100
-bands["plus_minus_pct"] = (200 * (p * (1 - p) / bands["applications"]) ** 0.5).round(2)
+# "Normal wobble" for each band (see src/metrics.py)
+bands["plus_minus_pct"] = wobble_pct(bands["fraud_rate_pct"], bands["applications"]).round(2)
 
 overall_rate = 100 * filtered["is_fraud"].mean()  # overall fraud rate for the current filters
 
@@ -303,13 +301,8 @@ money = run_sql("""
 
 total_fraud_loss = int(money["fraud_loss"].sum())
 
-# Riskiest first, then running totals: "if we review everyone with a score of at least this..."
-money = money.sort_values("risk_score", ascending=False)
-money["reviewed"] = money["applications"].cumsum()
-money["pct_reviewed"] = 100 * money["reviewed"] / money["applications"].sum()
-money["loss_prevented"] = catch_rate * money["fraud_loss"].cumsum()
-money["review_total"] = review_cost * money["reviewed"]
-money["net_benefit"] = money["loss_prevented"] - money["review_total"]
+# Riskiest first, then running totals (see src/metrics.py)
+money = net_benefit_table(money, review_cost, catch_rate)
 
 # The best policy is the row with the highest net benefit (idxmax = "index of the maximum").
 best = money.loc[money["net_benefit"].idxmax()]
