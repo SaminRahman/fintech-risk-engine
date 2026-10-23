@@ -8,11 +8,15 @@ from pathlib import Path
 
 import duckdb
 import plotly.express as px
+
 import streamlit as st
 # Streamlit only knows about the app/ folder, so tell Python where the project root is.
 # That lets us write "from src.metrics import ...".
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from src.metrics import lift, net_benefit_table, wobble_pct  # noqa: E402
+# One look for every Plotly chart: white background, light grid lines.
+px.defaults.template = "plotly_white"
+
 import pandas as pd
 
 DATA = "data/processed/scored_applications.csv"
@@ -20,6 +24,19 @@ DATA = "data/processed/scored_applications.csv"
 # --- PAGE SETUP ---
 st.set_page_config(page_title="Fraud Risk Engine", layout="wide")
 st.title("FinTech & Risk Operations Engine")
+st.caption(
+    "Synthetic data: 5,000 fake device-financing applications with fraud patterns "
+    "planted on purpose. The goal is to show the method, not to claim real-world results."
+)
+
+with st.expander("Key findings (full dataset, no filters)"):
+    st.markdown(
+        """
+- **The risk score works.** High-tier applications are fraud about **10.7%** of the time, versus **2.2%** for Low, roughly 5 times higher.
+- **Reviewing everyone is not the answer.** Whether a review pays off depends on what one costs. At $25 per review the best policy reviews about 74% of applications. At $60 it reviews only about 30%.
+- **Small groups wobble.** Credit-score bands differ by less than the normal random wobble, so the dashboard shows error bars instead of declaring a winner.
+        """
+    )
 st.caption("Synthetic device-financing applications scored with transparent SQL rules.")
 
 if not Path(DATA).exists():
