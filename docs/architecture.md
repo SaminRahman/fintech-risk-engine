@@ -2,7 +2,7 @@
 
 **Repository:** https://github.com/SaminRahman/fintech-risk-engine
 **Stack:** Python, NumPy, pandas, DuckDB (SQL), Streamlit, Plotly
-**Live demo:** PASTE YOUR STREAMLIT LINK HERE (hosted free on Streamlit Community Cloud)
+**Live demo:** https://telecomfraud-risk-engine.streamlit.app/ (hosted free on Streamlit Community Cloud)
 **Status:** Version 1 complete (started October 2026). Data pipeline, SQL risk scoring, an interactive dashboard (sidebar filters, review-policy curve, red-flag lift analysis, credit-score check and a dollar-impact analysis), 19 automated tests and a deployed live demo.
 **Last updated:** October 23, 2026
 
@@ -396,6 +396,7 @@ streamlit run app/dashboard.py
 | Refactor changed no results | Compare lift, error bars and dollar-impact values before and after moving code into `src/metrics.py` | Passed (all values identical) |
 | SQL and Python scoring agree | A test compares `src/scoring.py` with the SQL output on all 5,000 rows | Passed |
 | Automated tests | `python -m pytest` | 19 passed |
+| Deployed app matches local app | Compare KPI tiles and dollar-impact values on the live link | Passed (5,000 / 178 / 3.56% / 8.6%; $93,355 at $25) |
 
 ### Automated tests
 
