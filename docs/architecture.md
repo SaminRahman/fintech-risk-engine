@@ -2,8 +2,9 @@
 
 **Repository:** https://github.com/SaminRahman/fintech-risk-engine
 **Stack:** Python, NumPy, pandas, DuckDB (SQL), Streamlit, Plotly
-**Status:** In development (started October 2026). Data pipeline, SQL risk scoring and an interactive dashboard (sidebar filters, review-policy curve, red-flag lift analysis and a credit-score check) are complete; dollar-impact analysis is next.
-**Last updated:** October 22, 2026
+**Live demo:** PASTE YOUR STREAMLIT LINK HERE (hosted free on Streamlit Community Cloud)
+**Status:** Version 1 complete (started October 2026). Data pipeline, SQL risk scoring, an interactive dashboard (sidebar filters, review-policy curve, red-flag lift analysis, credit-score check and a dollar-impact analysis), 19 automated tests and a deployed live demo.
+**Last updated:** October 23, 2026
 
 ---
 
@@ -79,27 +80,40 @@ flowchart TD
 | `data/raw/applications.csv` | CSV (git-ignored) | The raw dataset; regenerated on demand from the seed |
 | `src/first_query.py` | Python, DuckDB SQL | Fraud rate by channel, run directly on the CSV |
 | `src/risk_score.py` | Python, DuckDB SQL | Scores every application with `CASE WHEN` rules, assigns a tier, saves the result and validates tiers against fraud |
-| `data/processed/scored_applications.csv` | CSV (git-ignored) | Raw data plus `risk_score` and `risk_tier` columns |
-| `app/dashboard.py` | Streamlit, Plotly, DuckDB | Interactive dashboard: sidebar filters, KPIs, fraud rate by tier, review-policy curve, fraud lift by red flag, credit-score check |
-| `requirements.txt` | pip | Pins library versions so the environment can be recreated |
+| `data/processed/scored_applications.csv` | CSV (tracked on purpose) | Raw data plus `risk_score` and `risk_tier` columns. It is the one data file committed to Git so the deployed app has data; it can be recreated from the seed |
+| `src/scoring.py` | Python, pandas | The same scoring rules written in Python, used as an independent reference by the tests |
+| `src/metrics.py` | Python | Small tested functions: `wobble_pct` (error bars), `lift`, `net_benefit_table` (review economics) |
+| `app/dashboard.py` | Streamlit, Plotly, DuckDB | Interactive dashboard: sidebar filters, KPIs, fraud rate by tier, review-policy curve, fraud lift by red flag, credit-score check, dollar-impact calculator |
+| `tests/` | pytest | 19 automated tests (data sanity, scoring rules, metric functions) |
+| `.streamlit/config.toml` | Streamlit | Light theme so the live app and screenshots look the same everywhere |
+| `requirements.txt` | pip | Pins library versions so the environment can be recreated and the app can be deployed |
 
 ### 3.5 Repository structure
 
 ```
 fintech-risk-engine/
+├── .streamlit/
+│   └── config.toml           # Dashboard theme
 ├── app/
 │   └── dashboard.py          # Streamlit dashboard
 ├── data/
 │   ├── raw/                  # Generated CSV (git-ignored)
-│   └── processed/            # Scored CSV (git-ignored)
+│   └── processed/            # Scored CSV (the one tracked data file)
 ├── docs/
 │   ├── architecture.md       # This document
 │   └── images/               # Dashboard screenshots
 ├── src/
 │   ├── generate_data.py      # Synthetic data generator
 │   ├── first_query.py        # First DuckDB SQL analysis
-│   └── risk_score.py         # SQL risk scoring and validation
+│   ├── risk_score.py         # SQL risk scoring and validation
+│   ├── scoring.py            # Python reference scoring (used by tests)
+│   └── metrics.py            # Tested dashboard calculations
+├── tests/
+│   ├── test_data.py          # Data sanity tests
+│   ├── test_scoring.py       # Scoring rule tests, SQL vs Python check
+│   └── test_metrics.py       # Metric function tests
 ├── .gitignore
+├── pytest.ini
 ├── README.md
 └── requirements.txt
 ```
@@ -237,6 +251,7 @@ With 5,000 rows, normal random variation is about +/-0.25 percentage points, so 
 - The rule-based score ranks risk correctly: High-tier applications are 4.8x as likely to be fraud as Low-tier ones.
 - Reviewing the riskiest 30% of applications catches 56% of fraud.
 - Address mismatch is the strongest single red flag (3.7x lift). Credit score, which the generator ignores, shows no detectable relationship with fraud.
+- Whether a review is worth it depends on its cost. With reviews that catch 90% of fraud, the best policy at $25 per review examines about 74% of applications and nets about $93,000; at $60 per review the best policy examines only about 30% and nets about $27,000.
 
 ### 8.1 Overall
 
@@ -305,6 +320,27 @@ Credit score is generated realistically but is not used in the fraud rules, so n
 
 The overall rate is 3.56%. Every band's error range includes it, so the differences are consistent with random noise: **no detectable relationship**. That is weaker than "proven unrelated"; a different random seed would reorder the bars. The wobble is about two standard errors, calculated as 200 x sqrt(p x (1 - p) / n) in percentage points.
 
+### 8.7 Dollar impact (which review policy pays?)
+
+Each fraud case is assumed to cost the lender the device price, with no recovery. The total fraud loss in the dataset is **$217,500** across 178 cases (about $1,222 per case).
+
+A policy means "review every application with a risk score at or above a cutoff". For each cutoff the dashboard calculates:
+
+- **Loss prevented** = catch rate x fraud dollars among reviewed applications
+- **Review cost** = cost per review x applications reviewed
+- **Net benefit** = loss prevented - review cost
+
+The best cutoff is the one with the highest net benefit. Intuitively, a group of applications is worth reviewing while its average fraud dollars per application x catch rate is greater than the cost of one review.
+
+Results with reviews that catch 90% of fraud:
+
+| Cost per review | Best policy | Applications reviewed | Loss prevented | Review spend | Net benefit |
+|---|---|---|---|---|---|
+| $25 | Score 5 or more | 3,707 (74.1%) | $186,030 | $92,675 | **$93,355** |
+| $60 | Score 15 or more | 1,484 (29.7%) | $115,650 | $89,040 | **$26,610** |
+
+Reviewing everyone is not the best policy at either price: it nets $70,750 at $25 per review and loses $104,250 at $60 per review. The $60 policy is the same High + Medium group from section 8.4. When reviews get 2.4 times more expensive, the best policy reviews less than half as many applications and the net benefit falls by about 70%. The right review cutoff is a business decision that depends on review cost and review quality, not a property of the score alone.
+
 ---
 
 ## 9. Dashboard
@@ -323,7 +359,13 @@ The overall rate is 3.56%. Every band's error range includes it, so the differen
 
 ![Dashboard v2](images/dashboard-v2.png)
 
-**Planned:** a dollar-impact section: given a cost per manual review and a review catch rate, which review cutoff maximises net savings?
+**Dollar impact (done):** two sliders (cost per manual review, share of fraud a review catches) drive a net-benefit curve over review cutoffs. The dashboard reports the best cutoff, the share of applications reviewed, the loss prevented and the net benefit (section 8.7). If no policy has a positive net benefit, it says to review nobody.
+
+**Code clean-up (done):** the lift, error-bar and net-benefit calculations moved out of the dashboard into `src/metrics.py`, each with tests. The refactor was accepted only after every number on screen matched its value from before the change.
+
+**Polish and release (done):** light theme, a synthetic-data caption, a collapsible key-findings box, consistent chart styling, and deployment to Streamlit Community Cloud.
+
+![Dashboard v3](images/dashboard-v3.png)
 
 Run it with:
 
@@ -350,6 +392,22 @@ streamlit run app/dashboard.py
 | Red-flag rates match rules-based expectation | Compare observed rates to rates implied by the generator rules | Passed, except the new-account flag (49 applications), which is explained by sampling noise |
 | Credit score shows no pattern | Every band's error range includes the overall rate | Passed (consistent with the generator ignoring credit score) |
 | Reproducibility | Fixed seed of 42 | Same data on every run |
+| Dollar-impact numbers tie out | Loss prevented minus review spend equals net benefit; high + medium reviews equal the 1,484 in section 8.4 | Passed ($186,030 - $92,675 = $93,355; $115,650 - $89,040 = $26,610) |
+| Refactor changed no results | Compare lift, error bars and dollar-impact values before and after moving code into `src/metrics.py` | Passed (all values identical) |
+| SQL and Python scoring agree | A test compares `src/scoring.py` with the SQL output on all 5,000 rows | Passed |
+| Automated tests | `python -m pytest` | 19 passed |
+
+### Automated tests
+
+Run with `python -m pytest` (configured by `pytest.ini`).
+
+| File | Tests | What it protects |
+|---|---|---|
+| `tests/test_data.py` | 6 | Row count and unique IDs, no missing values, expected categories, credit scores within 300-850, address mismatch near 8% (a regression test for the bug below), plausible overall fraud rate |
+| `tests/test_scoring.py` | 6 | Clean application scores 0, each flag adds its points, boundary values (29 vs 30 days, $1,399 vs $1,400, 14 vs 15 and 39 vs 40 points), a worked example, and agreement between the Python rules and the SQL output |
+| `tests/test_metrics.py` | 7 | Error-bar formula against a hand calculation and the dashboard's values, lift with a zero denominator, net benefit on a small table worked out by hand, and that inputs are not modified |
+
+Two lessons from building them: broad checks miss subtle bugs (the buggy overall fraud rate of 2.64% still passed a broad 2.5% to 4.5% range, so a specific address-mismatch check was needed), and comparing two independent implementations (SQL and Python) catches changes made in only one place.
 
 ### Bug log
 
@@ -357,6 +415,9 @@ streamlit run app/dashboard.py
 |---|---|---|---|
 | `address_mismatch` always False | Overall fraud rate 2.64%, below the expected 3.34% | `rng.choice(N) < 0.08` returns **one** random number and one True/False, which pandas copied to all rows. Should be `rng.random(N) < 0.08`, which gives 5,000 independent values | Corrected the line and verified with `value_counts()` |
 | Missing comma in DataFrame definition | `SyntaxError: Perhaps you forgot a comma?` | A dictionary entry was missing its trailing comma; Python reported the error on the following line | Added the comma |
+| Git still ignored the scored CSV needed for deployment | `git check-ignore` still pointed at the old `data/processed/` rule and `data/` showed as untracked | The old rule ignored the whole folder, so an exception inside it cannot work; the edit had also replaced the wrong line | Rewrote `.gitignore` with `data/processed/*` plus `!data/processed/scored_applications.csv` and confirmed with `git status -uall` |
+
+**Regression test:** the first bug is now guarded by `test_address_mismatch_is_about_8_percent`, which fails if the flag is ever switched off again.
 
 **How the first bug was caught:** the hand calculation predicted about 3.3%, but the run gave 2.64%, almost exactly the 2.70% expected with the address rule switched off. A gap that large and that specific pointed to one missing rule, and a column check confirmed it. The lesson: a bug that raises no error can only be caught by checking outputs against expectations.
 
@@ -371,7 +432,9 @@ streamlit run app/dashboard.py
 - Only six risk signals are modelled; real systems use many more (device fingerprints, IP address, velocity across accounts).
 - Scoring is rule-based, with no machine learning model.
 - Rates for flags with few applications (for example the 49 new-account applications) are noisy; firm conclusions about them would need larger samples.
-- No fraud-loss dollar amounts yet; the analysis counts cases rather than money.
+- Dollar loss is simply the device price. It ignores recovery of devices, shipping, collections costs and the cost of turning away genuine customers.
+- Review cost and catch rate are assumptions chosen with sliders, not measured values; real values would come from operations data.
+- The free hosting plan puts the live app to sleep when nobody visits, so the first load after a quiet period can take a few seconds.
 
 ---
 
@@ -388,9 +451,10 @@ streamlit run app/dashboard.py
 | Dashboard | Sidebar filters (channel, device, date) | Done |
 | Dashboard | Review-policy curve (review top X%, fraud caught) | Done |
 | Analysis | Fraud rate and lift by individual red flag; credit-score check | Done |
-| Impact | Dollar impact: net savings at different review cutoffs, with adjustable review cost and catch rate | Next |
-| Quality | Code clean-up into functions, comments and a small test | Planned |
-| Release | Dashboard polish, deployed live demo and polished README | Planned |
+| Impact | Dollar impact: net savings at different review cutoffs, with adjustable review cost and catch rate | Done |
+| Quality | Code clean-up into tested functions; 19 automated tests including a SQL-vs-Python consistency check | Done |
+| Release | Dashboard polish, README rewrite, deployed live demo | Done |
+| Next project | Michigan Real Estate Yield Analyzer (Excel pro-forma and Streamlit app) | Planned |
 
 ---
 
@@ -416,6 +480,9 @@ python src/risk_score.py
 
 # 6. Launch the dashboard
 streamlit run app/dashboard.py
+
+# 7. Run the automated tests
+python -m pytest
 ```
 
 ---
@@ -426,7 +493,9 @@ streamlit run app/dashboard.py
 - **SQL (DuckDB):** aggregation, grouping, type casting, `CASE WHEN` scoring, CTEs, querying CSVs directly
 - **Analytics:** fraud-rate metrics, risk tiers, lift analysis, review-policy trade-offs, hand-estimating expected results, tying out totals
 - **Statistical thinking:** sample-size caution, error bars (about two standard errors), testing that an analysis does not invent patterns
+- **Business analysis:** turning a risk score into a cost-benefit decision (review cost, catch rate, net benefit)
 - **Data validation:** debugging a silent data bug using expectation checks
+- **Testing:** pytest unit, boundary and regression tests; checking two independent implementations (SQL and Python) against each other
 - **Dashboarding:** Streamlit and Plotly with live SQL
-- **Engineering practice:** Git and GitHub workflow, reproducible environment, documentation
+- **Engineering practice:** Git and GitHub workflow, refactoring without changing results, reproducible environment, deployment to Streamlit Community Cloud, documentation
 - **Domain knowledge:** fraud signals drawn from real device-financing investigations
