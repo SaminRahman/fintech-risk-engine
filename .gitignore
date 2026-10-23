@@ -3,8 +3,12 @@ __pycache__/
 *.pyc
 .DS_Store
 .env
-data/raw/
 .ipynb_checkpoints/
-data/processed/
-.agents/
 .pytest_cache/
+.agents/
+
+# Ignore the raw data. Ignore everything in processed/ except the one
+# scored file that the deployed app needs.
+data/raw/
+data/processed/*
+!data/processed/scored_applications.csv
