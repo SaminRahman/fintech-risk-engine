@@ -8,6 +8,7 @@ duckdb==1.5.6
 Faker==40.43.0
 h11==0.16.0
 idna==3.20
+iniconfig==2.3.1
 itsdangerous==2.2.0
 Jinja2==3.1.6
 jsonschema==4.26.0
@@ -19,9 +20,12 @@ packaging==26.3
 pandas==3.0.6
 pillow==12.3.0
 plotly==7.1.0
+pluggy==1.7.0
 protobuf==7.36.2
 pyarrow==26.0.0
 pydeck==0.9.3
+Pygments==2.21.0
+pytest==9.1.1
 python-dateutil==2.9.0.post0
 python-multipart==0.0.32
 referencing==0.37.0
